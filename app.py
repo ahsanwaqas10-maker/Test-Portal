@@ -3,9 +3,12 @@ import pandas as pd
 import time
 
 # --- CONFIGURATION ---
-PORTAL_PIN = "1234"           # Change test passcode here anytime
-DEFAULT_TEST_MINUTES = 15     # Total test duration
-PASSING_PERCENTAGE = 85       # Passing threshold updated to 85%
+PORTAL_PIN = "1234"
+DEFAULT_TEST_MINUTES = 15     # Time limit per test section
+PASSING_PERCENTAGE = 85       # Combined overall passing score
+
+# Sequence of test series
+STAGE_SEQUENCE = ["Verbal", "Non-Verbal", "English", "General Science", "Math", "Urdu"]
 
 st.set_page_config(page_title="Exam Portal", layout="wide")
 
@@ -21,23 +24,25 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "student_name" not in st.session_state:
     st.session_state.student_name = ""
+if "stage_index" not in st.session_state:
+    st.session_state.stage_index = 0
 if "current_q" not in st.session_state:
     st.session_state.current_q = 0
-if "answers" not in st.session_state:
-    st.session_state.answers = {}
+if "all_answers" not in st.session_state:
+    st.session_state.all_answers = {}  # Stores answers across all stages
 if "marked" not in st.session_state:
     st.session_state.marked = set()
-if "submitted" not in st.session_state:
-    st.session_state.submitted = False
+if "submitted_all" not in st.session_state:
+    st.session_state.submitted_all = False
 
-# --- WINDOW 1: LOGIN ENTRY FORM ---
+# --- STAGE 1: LOGIN ENTRY FORM ---
 if not st.session_state.authenticated:
     st.subheader("Student Portal Login")
     
     with st.form("login_form"):
         name_input = st.text_input("Student Name:", placeholder="Enter your full name")
         pin_input = st.text_input("Password / PIN:", type="password", placeholder="Enter test password")
-        submit_login = st.form_submit_button("Start Exam")
+        submit_login = st.form_submit_button("Start Exam Series")
 
         if submit_login:
             if not name_input.strip():
@@ -47,182 +52,246 @@ if not st.session_state.authenticated:
             else:
                 st.session_state.authenticated = True
                 st.session_state.student_name = name_input.strip()
+                st.session_state.stage_index = 0
                 st.session_state.start_time = time.time()
                 st.rerun()
 
-# --- WINDOW 2: EXAM INTERFACE ---
-else:
+# --- STAGE 2: MULTI-SERIES EXAM INTERFACE ---
+elif not st.session_state.submitted_all:
     try:
-        df = load_questions()
-        if df.empty:
+        df_full = load_questions()
+        if df_full.empty:
             st.error("The question database is empty.")
             st.stop()
 
-        cols = {c.lower().replace(" ", ""): c for c in df.columns}
-        id_col = cols.get('id', df.columns[0])
-        subject_col = cols.get('subject', df.columns[1])
-        question_col = cols.get('question', df.columns[2])
-        op_a = cols.get('optiona', df.columns[3])
-        op_b = cols.get('optionb', df.columns[4])
-        op_c = cols.get('optionc', df.columns[5])
-        op_d = cols.get('optiond', df.columns[6])
-        ans_col = cols.get('correctanswer', df.columns[7])
+        cols = {c.lower().replace(" ", ""): c for c in df_full.columns}
+        id_col = cols.get('id', df_full.columns[0])
+        subject_col = cols.get('subject', df_full.columns[1])
+        question_col = cols.get('question', df_full.columns[2])
+        op_a = cols.get('optiona', df_full.columns[3])
+        op_b = cols.get('optionb', df_full.columns[4])
+        op_c = cols.get('optionc', df_full.columns[5])
+        op_d = cols.get('optiond', df_full.columns[6])
+        ans_col = cols.get('correctanswer', df_full.columns[7])
 
-        total_q = len(df)
+        # Get current stage subject
+        curr_stage_name = STAGE_SEQUENCE[st.session_state.stage_index]
+        
+        # Filter questions for current stage (case-insensitive search)
+        df_stage = df_full[df_full[subject_col].astype(str).str.strip().str.lower() == curr_stage_name.lower()].reset_index(drop=True)
 
-        if not st.session_state.submitted:
-            total_seconds = DEFAULT_TEST_MINUTES * 60
-            elapsed_seconds = int(time.time() - st.session_state.start_time)
-            remaining_seconds = total_seconds - elapsed_seconds
-
-            if remaining_seconds <= 0:
-                st.session_state.submitted = True
-                st.warning("⏰ Time has expired. Your test was automatically submitted.")
+        # Skip stage automatically if no questions exist for this subject
+        if df_stage.empty:
+            if st.session_state.stage_index < len(STAGE_SEQUENCE) - 1:
+                st.session_state.stage_index += 1
+                st.session_state.current_q = 0
+                st.session_state.start_time = time.time()
+                st.rerun()
+            else:
+                st.session_state.submitted_all = True
                 st.rerun()
 
-            mins, secs = divmod(remaining_seconds, 60)
-            
-            st.caption(f"Candidate: **{st.session_state.student_name}**")
-            st.metric("⏳ Time Remaining", f"{mins:02d}:{secs:02d}")
-            st.divider()
+        total_q = len(df_stage)
 
-            col_main, col_nav = st.columns([3, 1])
+        # Reverse timer per stage
+        total_seconds = DEFAULT_TEST_MINUTES * 60
+        elapsed_seconds = int(time.time() - st.session_state.start_time)
+        remaining_seconds = total_seconds - elapsed_seconds
 
-            curr_idx = st.session_state.current_q
-            row = df.iloc[curr_idx]
-            q_id = row[id_col]
-
-            with col_main:
-                st.subheader(f"Question {curr_idx + 1} of {total_q}")
-                st.markdown(f"**Subject:** {row[subject_col]}")
-                st.markdown(f"### {row[question_col]}")
-
-                options = [
-                    str(row[op_a]).strip(),
-                    str(row[op_b]).strip(),
-                    str(row[op_c]).strip(),
-                    str(row[op_d]).strip()
-                ]
-
-                saved_ans = st.session_state.answers.get(q_id, None)
-                saved_index = options.index(saved_ans) if saved_ans in options else None
-
-                user_choice = st.radio(
-                    "Select Option:", 
-                    options, 
-                    index=saved_index, 
-                    key=f"radio_{q_id}_{curr_idx}"
-                )
-
-                if user_choice:
-                    st.session_state.answers[q_id] = user_choice
-
-                st.write("---")
-                
-                btn_prev, btn_mark, btn_next = st.columns(3)
-
-                with btn_prev:
-                    if st.button("⬅️ Previous", disabled=(curr_idx == 0)):
-                        st.session_state.current_q -= 1
-                        st.rerun()
-
-                with btn_mark:
-                    is_marked = q_id in st.session_state.marked
-                    mark_label = "🔖 Unmark Question" if is_marked else "📌 Mark for Review"
-                    if st.button(mark_label):
-                        if is_marked:
-                            st.session_state.marked.remove(q_id)
-                        else:
-                            st.session_state.marked.add(q_id)
-                        st.rerun()
-
-                with btn_next:
-                    if st.button("Next ➡️", disabled=(curr_idx == total_q - 1)):
-                        st.session_state.current_q += 1
-                        st.rerun()
-
-            with col_nav:
-                st.markdown("### Palette")
-                st.caption("🟢 Answered | 🟡 Marked | ⚪ Empty")
-
-                grid_cols = st.columns(4)
-                for idx in range(total_q):
-                    qid = df.iloc[idx][id_col]
-                    
-                    if qid in st.session_state.marked:
-                        badge = f"🟡 {idx+1}"
-                    elif qid in st.session_state.answers:
-                        badge = f"🟢 {idx+1}"
-                    else:
-                        badge = f"⚪ {idx+1}"
-
-                    col_idx = idx % 4
-                    with grid_cols[col_idx]:
-                        if st.button(badge, key=f"nav_btn_{idx}"):
-                            st.session_state.current_q = idx
-                            st.rerun()
-
-                st.write("---")
-                if st.button("🚨 Submit Exam", type="primary"):
-                    st.session_state.confirm_submit = True
-
-            if st.session_state.get("confirm_submit", False):
-                st.warning("⚠️ **FINAL SUBMISSION VERIFICATION**")
-                
-                answered_cnt = len(st.session_state.answers)
-                unanswered_cnt = total_q - answered_cnt
-                marked_cnt = len(st.session_state.marked)
-
-                st.write(f"* **Candidate Name:** {st.session_state.student_name}")
-                st.write(f"* **Total Questions:** {total_q}")
-                st.write(f"* **Answered:** {answered_cnt}")
-                st.write(f"* **Unanswered:** {unanswered_cnt}")
-                st.write(f"* **Marked for Review:** {marked_cnt}")
-
-                c_yes, c_no = st.columns(2)
-                with c_yes:
-                    if st.button("✅ Finish & Submit"):
-                        st.session_state.submitted = True
-                        st.session_state.confirm_submit = False
-                        st.rerun()
-                with c_no:
-                    if st.button("❌ Return to Test"):
-                        st.session_state.confirm_submit = False
-                        st.rerun()
-
-            time.sleep(1)
+        # Time-out handler for current stage
+        if remaining_seconds <= 0:
+            st.warning(f"⏰ Time expired for section: {curr_stage_name}!")
+            time.sleep(2)
+            if st.session_state.stage_index < len(STAGE_SEQUENCE) - 1:
+                st.session_state.stage_index += 1
+                st.session_state.current_q = 0
+                st.session_state.marked = set()
+                st.session_state.start_time = time.time()
+            else:
+                st.session_state.submitted_all = True
             st.rerun()
 
-        # Scorecard Window with 85% Passing Criteria
-        else:
-            st.header("📊 Final Scorecard")
-            st.markdown(f"**Student Name:** {st.session_state.student_name}")
+        mins, secs = divmod(remaining_seconds, 60)
 
-            score = 0
-            for idx, row in df.iterrows():
-                qid = row[id_col]
-                u_ans = str(st.session_state.answers.get(qid, "")).strip()
-                c_ans = str(row[ans_col]).strip()
-                if u_ans == c_ans:
-                    score += 1
+        # Top Banner showing active section & progress
+        st.info(f"📍 **Series {st.session_state.stage_index + 1} of {len(STAGE_SEQUENCE)}:** {curr_stage_name} Test | Candidate: **{st.session_state.student_name}**")
+        st.metric("⏳ Section Time Remaining", f"{mins:02d}:{secs:02d}")
+        st.divider()
 
-            pct = (score / total_q) * 100
-            st.metric("Final Result", f"{score} / {total_q}", f"{pct:.1f}%")
+        col_main, col_nav = st.columns([3, 1])
 
-            if pct >= PASSING_PERCENTAGE:
-                st.balloons()
-                st.success(f"🎉 Exam Passed! (Score: {pct:.1f}% >= Required {PASSING_PERCENTAGE}%)")
+        curr_idx = st.session_state.current_q
+        row = df_stage.iloc[curr_idx]
+        q_id = row[id_col]
+
+        with col_main:
+            st.subheader(f"Question {curr_idx + 1} of {total_q}")
+            st.markdown(f"### {row[question_col]}")
+
+            options = [
+                str(row[op_a]).strip(),
+                str(row[op_b]).strip(),
+                str(row[op_c]).strip(),
+                str(row[op_d]).strip()
+            ]
+
+            saved_ans = st.session_state.all_answers.get(q_id, None)
+            saved_index = options.index(saved_ans) if saved_ans in options else None
+
+            user_choice = st.radio(
+                "Select Option:", 
+                options, 
+                index=saved_index, 
+                key=f"radio_{q_id}_{curr_idx}"
+            )
+
+            if user_choice:
+                st.session_state.all_answers[q_id] = user_choice
+
+            st.write("---")
+            
+            btn_prev, btn_mark, btn_next = st.columns(3)
+
+            with btn_prev:
+                if st.button("⬅️ Previous", disabled=(curr_idx == 0)):
+                    st.session_state.current_q -= 1
+                    st.rerun()
+
+            with btn_mark:
+                is_marked = q_id in st.session_state.marked
+                mark_label = "🔖 Unmark" if is_marked else "📌 Mark for Review"
+                if st.button(mark_label):
+                    if is_marked:
+                        st.session_state.marked.remove(q_id)
+                    else:
+                        st.session_state.marked.add(q_id)
+                    st.rerun()
+
+            with btn_next:
+                if st.button("Next ➡️", disabled=(curr_idx == total_q - 1)):
+                    st.session_state.current_q += 1
+                    st.rerun()
+
+        with col_nav:
+            st.markdown(f"### {curr_stage_name} Palette")
+            st.caption("🟢 Answered | 🟡 Marked | ⚪ Empty")
+
+            grid_cols = st.columns(4)
+            for idx in range(total_q):
+                qid = df_stage.iloc[idx][id_col]
+                
+                if qid in st.session_state.marked:
+                    badge = f"🟡 {idx+1}"
+                elif qid in st.session_state.all_answers:
+                    badge = f"🟢 {idx+1}"
+                else:
+                    badge = f"⚪ {idx+1}"
+
+                col_idx = idx % 4
+                with grid_cols[col_idx]:
+                    if st.button(badge, key=f"nav_btn_{idx}"):
+                        st.session_state.current_q = idx
+                        st.rerun()
+
+            st.write("---")
+            
+            # Button label changes dynamically based on stage
+            if st.session_state.stage_index < len(STAGE_SEQUENCE) - 1:
+                next_stage = STAGE_SEQUENCE[st.session_state.stage_index + 1]
+                submit_label = f"Submit & Proceed to {next_stage} ➡️"
             else:
-                st.warning(f"❌ Exam Failed. Required passing score is {PASSING_PERCENTAGE}%. (Achieved: {pct:.1f}%)")
+                submit_label = "🚨 Finalize Complete Exam"
 
-            if st.button("🔄 Logout & Exit"):
-                st.session_state.authenticated = False
-                st.session_state.student_name = ""
-                st.session_state.current_q = 0
-                st.session_state.answers = {}
-                st.session_state.marked = set()
-                st.session_state.submitted = False
-                st.rerun()
+            if st.button(submit_label, type="primary"):
+                st.session_state.confirm_submit = True
+
+        # Confirmation Modal
+        if st.session_state.get("confirm_submit", False):
+            st.warning(f"⚠️ **CONFIRM SUBMISSION FOR {curr_stage_name.upper()} TEST**")
+            
+            answered_cnt = sum(1 for qid in df_stage[id_col] if qid in st.session_state.all_answers)
+            unanswered_cnt = total_q - answered_cnt
+
+            st.write(f"* **Section:** {curr_stage_name}")
+            st.write(f"* **Answered:** {answered_cnt} / {total_q}")
+            st.write(f"* **Unanswered:** {unanswered_cnt}")
+
+            c_yes, c_no = st.columns(2)
+            with c_yes:
+                if st.button("✅ Confirm & Next"):
+                    st.session_state.confirm_submit = False
+                    if st.session_state.stage_index < len(STAGE_SEQUENCE) - 1:
+                        st.session_state.stage_index += 1
+                        st.session_state.current_q = 0
+                        st.session_state.marked = set()
+                        st.session_state.start_time = time.time()
+                    else:
+                        st.session_state.submitted_all = True
+                    st.rerun()
+            with c_no:
+                if st.button("❌ Return to Section"):
+                    st.session_state.confirm_submit = False
+                    st.rerun()
+
+        time.sleep(1)
+        st.rerun()
 
     except Exception as e:
         st.error(f"System Error: {e}")
+
+# --- STAGE 3: COMPREHENSIVE SCORECARD ---
+else:
+    st.header("📊 Final Combined Scorecard")
+    st.markdown(f"**Student Name:** {st.session_state.student_name}")
+
+    try:
+        df_full = load_questions()
+        cols = {c.lower().replace(" ", ""): c for c in df_full.columns}
+        id_col = cols.get('id', df_full.columns[0])
+        subject_col = cols.get('subject', df_full.columns[1])
+        ans_col = cols.get('correctanswer', df_full.columns[7])
+
+        total_questions_all = len(df_full)
+        overall_score = 0
+
+        st.subheader("Sectional Breakdown:")
+        
+        # Display breakdown per subject series
+        for subject_name in STAGE_SEQUENCE:
+            df_sub = df_full[df_full[subject_col].astype(str).str.strip().str.lower() == subject_name.lower()]
+            if not df_sub.empty:
+                sub_score = 0
+                sub_total = len(df_sub)
+                for idx, row in df_sub.iterrows():
+                    qid = row[id_col]
+                    u_ans = str(st.session_state.all_answers.get(qid, "")).strip()
+                    c_ans = str(row[ans_col]).strip()
+                    if u_ans == c_ans:
+                        sub_score += 1
+                
+                overall_score += sub_score
+                sub_pct = (sub_score / sub_total) * 100
+                st.write(f"* **{subject_name}:** {sub_score} / {sub_total} ({sub_pct:.1f}%)")
+
+        st.divider()
+        final_pct = (overall_score / total_questions_all) * 100 if total_questions_all > 0 else 0
+        st.metric("Total Score", f"{overall_score} / {total_questions_all}", f"{final_pct:.1f}%")
+
+        if final_pct >= PASSING_PERCENTAGE:
+            st.balloons()
+            st.success(f"🎉 Exam Series Passed! Overall Score: {final_pct:.1f}% (Required: {PASSING_PERCENTAGE}%)")
+        else:
+            st.warning(f"❌ Exam Series Failed. Overall Score: {final_pct:.1f}% (Required: {PASSING_PERCENTAGE}%)")
+
+        if st.button("🔄 Logout & Exit"):
+            st.session_state.authenticated = False
+            st.session_state.student_name = ""
+            st.session_state.stage_index = 0
+            st.session_state.current_q = 0
+            st.session_state.all_answers = {}
+            st.session_state.marked = set()
+            st.session_state.submitted_all = False
+            st.rerun()
+
+    except Exception as e:
+        st.error(f"Error calculating final scores: {e}")
