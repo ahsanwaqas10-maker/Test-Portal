@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import time
 
-# --- CONFIGURATION & PASSWORD ---
-# Change this password whenever you want to issue a new test key
-PORTAL_PIN = "1234"
-DEFAULT_TEST_MINUTES = 15
+# --- CONFIGURATION ---
+PORTAL_PIN = "1234"           # Change test passcode here anytime
+DEFAULT_TEST_MINUTES = 15     # Total test duration
+PASSING_PERCENTAGE = 85       # Passing threshold updated to 85%
 
 st.set_page_config(page_title="Exam Portal", layout="wide")
 
@@ -71,7 +71,6 @@ else:
         total_q = len(df)
 
         if not st.session_state.submitted:
-            # Live Reverse Timer
             total_seconds = DEFAULT_TEST_MINUTES * 60
             elapsed_seconds = int(time.time() - st.session_state.start_time)
             remaining_seconds = total_seconds - elapsed_seconds
@@ -83,7 +82,6 @@ else:
 
             mins, secs = divmod(remaining_seconds, 60)
             
-            # Header Bar
             st.caption(f"Candidate: **{st.session_state.student_name}**")
             st.metric("⏳ Time Remaining", f"{mins:02d}:{secs:02d}")
             st.divider()
@@ -94,7 +92,6 @@ else:
             row = df.iloc[curr_idx]
             q_id = row[id_col]
 
-            # Question Body
             with col_main:
                 st.subheader(f"Question {curr_idx + 1} of {total_q}")
                 st.markdown(f"**Subject:** {row[subject_col]}")
@@ -122,7 +119,6 @@ else:
 
                 st.write("---")
                 
-                # Navigation Controls
                 btn_prev, btn_mark, btn_next = st.columns(3)
 
                 with btn_prev:
@@ -145,7 +141,6 @@ else:
                         st.session_state.current_q += 1
                         st.rerun()
 
-            # Side Palette
             with col_nav:
                 st.markdown("### Palette")
                 st.caption("🟢 Answered | 🟡 Marked | ⚪ Empty")
@@ -171,7 +166,6 @@ else:
                 if st.button("🚨 Submit Exam", type="primary"):
                     st.session_state.confirm_submit = True
 
-            # Confirmation Modal
             if st.session_state.get("confirm_submit", False):
                 st.warning("⚠️ **FINAL SUBMISSION VERIFICATION**")
                 
@@ -199,7 +193,7 @@ else:
             time.sleep(1)
             st.rerun()
 
-        # Scorecard Window
+        # Scorecard Window with 85% Passing Criteria
         else:
             st.header("📊 Final Scorecard")
             st.markdown(f"**Student Name:** {st.session_state.student_name}")
@@ -215,11 +209,11 @@ else:
             pct = (score / total_q) * 100
             st.metric("Final Result", f"{score} / {total_q}", f"{pct:.1f}%")
 
-            if pct >= 50:
+            if pct >= PASSING_PERCENTAGE:
                 st.balloons()
-                st.success("Exam Passed.")
+                st.success(f"🎉 Exam Passed! (Score: {pct:.1f}% >= Required {PASSING_PERCENTAGE}%)")
             else:
-                st.warning("Exam Failed. Review syllabus material.")
+                st.warning(f"❌ Exam Failed. Required passing score is {PASSING_PERCENTAGE}%. (Achieved: {pct:.1f}%)")
 
             if st.button("🔄 Logout & Exit"):
                 st.session_state.authenticated = False
