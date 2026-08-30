@@ -10,7 +10,7 @@ except ImportError:
 
 # --- CONFIGURATION ---
 PORTAL_PIN = "1234"
-DEFAULT_TEST_MINUTES = 15     # Time limit per test section
+DEFAULT_TEST_MINUTES = 30     # Time limit per test section
 PASSING_PERCENTAGE = 85       # Combined overall passing score
 
 STAGE_SEQUENCE = ["Verbal", "Non-Verbal", "English", "General Science", "Math", "Urdu"]
