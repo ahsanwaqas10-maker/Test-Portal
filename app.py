@@ -3,6 +3,11 @@ import pandas as pd
 import time
 import os
 
+try:
+    from streamlit_autorefresh import st_autorefresh
+except ImportError:
+    st_autorefresh = None
+
 # --- CONFIGURATION ---
 PORTAL_PIN = "1234"
 DEFAULT_TEST_MINUTES = 15     # Time limit per test section
@@ -12,17 +17,20 @@ STAGE_SEQUENCE = ["Verbal", "Non-Verbal", "English", "General Science", "Math", 
 
 st.set_page_config(page_title="Exam Portal", layout="wide")
 
-# --- PERFORMANCE FIX: CACHE EXCEL READING ---
+# Live 1-second timer auto-refresh (Prevents UI lock/freeze)
+if st_autorefresh:
+    st_autorefresh(interval=1000, key="exam_timer_tick")
+
+# --- CACHE EXCEL FILE ---
 @st.cache_data
 def load_questions():
     df = pd.read_excel("questions.xlsx")
     df.columns = df.columns.astype(str).str.strip()
     return df
 
-# --- CUSTOM CSS FOR HIGH VISIBILITY & STYLING ---
+# --- CUSTOM CSS ---
 st.markdown("""
     <style>
-    /* Question Container Box */
     .question-card {
         background-color: #F8F9FA;
         border: 2px solid #0D6EFD;
@@ -32,7 +40,6 @@ st.markdown("""
         box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.08);
     }
     
-    /* Prominent Question Text */
     .question-title {
         color: #1E293B;
         font-size: 22px;
@@ -40,7 +47,6 @@ st.markdown("""
         margin: 0 0 5px 0;
     }
 
-    /* Option Container Box */
     .options-card {
         background-color: #FFFFFF;
         border: 1.5px solid #CBD5E1;
@@ -51,7 +57,6 @@ st.markdown("""
         box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.04);
     }
 
-    /* Large Action Buttons */
     .stButton>button {
         width: 100%;
         font-size: 16px !important;
@@ -60,9 +65,8 @@ st.markdown("""
         border-radius: 8px !important;
     }
 
-    /* Compact Navigation Grid Buttons */
     div[data-testid="column"] .stButton>button {
-        padding: 4px 2px !important;
+        padding: 6px 2px !important;
         font-size: 13px !important;
     }
     </style>
@@ -160,16 +164,16 @@ elif not st.session_state.submitted_all:
         total_q = len(df_stage)
 
         if st.session_state.current_q >= total_q:
-            st.session_state.current_q = 0
+            st.session_state.current_q = max(0, total_q - 1)
 
-        # Section Timer
+        # Section Timer Calculations
         total_seconds = DEFAULT_TEST_MINUTES * 60
         elapsed_seconds = int(time.time() - st.session_state.start_time)
         remaining_seconds = total_seconds - elapsed_seconds
 
         if remaining_seconds <= 0:
             st.warning(f"⏰ Time expired for section: {curr_stage_name}!")
-            time.sleep(1.5)
+            time.sleep(1)
             if st.session_state.stage_index < len(STAGE_SEQUENCE) - 1:
                 st.session_state.stage_index += 1
                 st.session_state.current_q = 0
@@ -185,7 +189,6 @@ elif not st.session_state.submitted_all:
         # Header Details
         st.info(f"📌 **Section {st.session_state.stage_index + 1} of {len(STAGE_SEQUENCE)}:** {curr_stage_name} Test | Candidate: **{st.session_state.student_name}**")
         
-        # Two-Column Layout (Main Question vs Right-Hand Palette)
         col_main, col_nav = st.columns([3, 1], gap="large")
 
         curr_idx = st.session_state.current_q
@@ -193,7 +196,7 @@ elif not st.session_state.submitted_all:
         q_id = row[id_col]
 
         with col_main:
-            # Highlighted Question Card Box
+            # Question Box
             st.markdown(f"""
                 <div class="question-card">
                     <span style="color: #2563EB; font-weight: bold; font-size: 14px;">QUESTION {curr_idx + 1} OF {total_q}</span>
@@ -201,15 +204,13 @@ elif not st.session_state.submitted_all:
                 </div>
             """, unsafe_allow_html=True)
 
-            # Optional Image Rendering
+            # Image Rendering
             if img_col and pd.notna(row[img_col]):
                 img_name = str(row[img_col]).strip()
                 if img_name and os.path.exists(img_name):
                     st.image(img_name, use_container_width=True)
-                elif img_name:
-                    st.warning(f"⚠️ Image file '{img_name}' missing from repository.")
 
-            # Highlighted Options Box
+            # Options Box
             options = [
                 str(row[op_a]).strip(),
                 str(row[op_b]).strip(),
@@ -232,12 +233,13 @@ elif not st.session_state.submitted_all:
             if user_choice:
                 st.session_state.all_answers[q_id] = user_choice
 
-            # Clear Action Control Buttons
+            # Navigation Control Buttons
             btn_prev, btn_mark, btn_next = st.columns(3)
 
             with btn_prev:
+                # Disabled only if on the first question AND there are multiple questions
                 if st.button("⬅️ Previous", disabled=(curr_idx == 0)):
-                    st.session_state.current_q -= 1
+                    st.session_state.current_q = max(0, st.session_state.current_q - 1)
                     sync_url()
                     st.rerun()
 
@@ -252,17 +254,17 @@ elif not st.session_state.submitted_all:
                     st.rerun()
 
             with btn_next:
+                # Disabled only if on the last question of the section
                 if st.button("Next ➡️", disabled=(curr_idx == total_q - 1)):
-                    st.session_state.current_q += 1
+                    st.session_state.current_q = min(total_q - 1, st.session_state.current_q + 1)
                     sync_url()
                     st.rerun()
 
-        # BRIEF & DETAILED RIGHT-HAND PANEL
+        # RIGHT-HAND PANEL
         with col_nav:
             st.metric("⏳ Section Timer", f"{mins:02d}:{secs:02d}")
             st.divider()
 
-            # Brief Metrics Summary
             answered_cnt = sum(1 for qid in df_stage[id_col] if qid in st.session_state.all_answers)
             marked_cnt = len([qid for qid in df_stage[id_col] if qid in st.session_state.marked])
             unanswered_cnt = total_q - answered_cnt
@@ -272,7 +274,6 @@ elif not st.session_state.submitted_all:
 
             st.markdown("**Question Palette:**")
             
-            # Compact 5-column button grid for smooth navigation
             grid_cols = st.columns(5)
             for idx in range(total_q):
                 qid = df_stage.iloc[idx][id_col]
@@ -302,7 +303,6 @@ elif not st.session_state.submitted_all:
             if st.button(submit_label, type="primary"):
                 st.session_state.confirm_submit = True
 
-        # Confirmation Modal
         if st.session_state.get("confirm_submit", False):
             st.warning(f"⚠️ **CONFIRM SUBMISSION FOR {curr_stage_name.upper()} TEST**")
             st.write(f"* **Answered:** {answered_cnt} / {total_q}")
