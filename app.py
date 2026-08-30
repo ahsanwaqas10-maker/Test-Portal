@@ -89,6 +89,8 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = query_params.get("auth", "0") == "1"
 if "student_name" not in st.session_state:
     st.session_state.student_name = query_params.get("name", "")
+if "test_number" not in st.session_state:
+    st.session_state.test_number = query_params.get("test_no", "Test 01")
 if "stage_index" not in st.session_state:
     st.session_state.stage_index = int(query_params.get("stage", "0"))
 if "current_q" not in st.session_state:
@@ -108,6 +110,7 @@ def sync_url():
     st.query_params.update({
         "auth": "1" if st.session_state.authenticated else "0",
         "name": st.session_state.student_name,
+        "test_no": st.session_state.test_number,
         "stage": str(st.session_state.stage_index),
         "q": str(st.session_state.current_q),
         "t": str(st.session_state.start_time),
@@ -119,18 +122,22 @@ def sync_url():
 if not st.session_state.authenticated:
     st.subheader("Student Portal Login")
     with st.form("login_form"):
-        name_input = st.text_input("Student Name:", placeholder="Enter your full name")
+        name_input = st.text_input("Candidate Name:", placeholder="Enter your full name")
+        test_no_input = st.text_input("Test Number / Identifier:", value="Weekend Test 01", placeholder="e.g., Test 01, Weekend Mock 2")
         pin_input = st.text_input("Password / PIN:", type="password", placeholder="Enter test password")
         submit_login = st.form_submit_button("Start Exam Series", type="primary")
 
         if submit_login:
             if not name_input.strip():
                 st.error("Please enter your name to proceed.")
+            elif not test_no_input.strip():
+                st.error("Please specify a test number or name.")
             elif pin_input != PORTAL_PIN:
                 st.error("Incorrect password. Please verify your passcode.")
             else:
                 st.session_state.authenticated = True
                 st.session_state.student_name = name_input.strip()
+                st.session_state.test_number = test_no_input.strip()
                 st.session_state.stage_index = 0
                 st.session_state.current_q = 0
                 st.session_state.transition = False
@@ -182,7 +189,7 @@ elif not st.session_state.submitted_all:
             if st.session_state.stage_index < len(STAGE_SEQUENCE) - 1:
                 next_stage = STAGE_SEQUENCE[st.session_state.stage_index + 1]
                 st.markdown(f"<h2 style='text-align: center; color: #1E293B;'>Get Ready for the Next Challenge:<br><span style='color: #0D6EFD;'>{next_stage} Test</span></h2>", unsafe_allow_html=True)
-                st.markdown(f"<p style='text-align: center; font-size: 18px;'>You will have <b>{DEFAULT_TEST_MINUTES} minutes</b> to complete this section.</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align: center; font-size: 18px;'><b>Test Identifier:</b> {st.session_state.test_number} | Time Limit: <b>{DEFAULT_TEST_MINUTES} minutes</b></p>", unsafe_allow_html=True)
                 st.write("")
                 
                 col1, col2, col3 = st.columns([1, 2, 1])
@@ -208,7 +215,6 @@ elif not st.session_state.submitted_all:
             elapsed_seconds = int(time.time() - st.session_state.start_time)
             remaining_seconds = total_seconds - elapsed_seconds
 
-            # Auto-submit if time expires
             if remaining_seconds <= 0:
                 st.warning(f"⏰ Time expired for section: {curr_stage_name}!")
                 time.sleep(1.5)
@@ -219,7 +225,7 @@ elif not st.session_state.submitted_all:
 
             mins, secs = divmod(max(0, remaining_seconds), 60)
 
-            st.info(f"📌 **Section {st.session_state.stage_index + 1} of {len(STAGE_SEQUENCE)}:** {curr_stage_name} Test | Candidate: **{st.session_state.student_name}**")
+            st.info(f"📌 **{st.session_state.test_number}** | **Section {st.session_state.stage_index + 1} of {len(STAGE_SEQUENCE)}:** {curr_stage_name} Test | Candidate: **{st.session_state.student_name}**")
             
             col_main, col_nav = st.columns([3, 1], gap="large")
             curr_idx = st.session_state.current_q
@@ -347,7 +353,7 @@ elif not st.session_state.submitted_all:
 # --- STAGE 3: COMPREHENSIVE SCORECARD ---
 else:
     st.header("📊 Final Combined Scorecard")
-    st.markdown(f"**Student Name:** {st.session_state.student_name}")
+    st.markdown(f"**Candidate Name:** {st.session_state.student_name} | **Test Number:** `{st.session_state.test_number}`")
 
     try:
         df_full = load_questions()
@@ -378,7 +384,7 @@ else:
 
         st.divider()
         final_pct = (overall_score / total_questions_all) * 100 if total_questions_all > 0 else 0
-        st.metric("Total Score", f"{overall_score} / {total_questions_all}", f"{final_pct:.1f}%")
+        st.metric(f"Total Score ({st.session_state.test_number})", f"{overall_score} / {total_questions_all}", f"{final_pct:.1f}%")
 
         if final_pct >= PASSING_PERCENTAGE:
             st.balloons()
