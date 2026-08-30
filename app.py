@@ -10,7 +10,7 @@ except ImportError:
 
 # --- CONFIGURATION ---
 PORTAL_PIN = "1234"
-DEFAULT_TEST_MINUTES = 30     # Time limit per test section
+DEFAULT_TEST_MINUTES = 15     # Time limit per test section
 PASSING_PERCENTAGE = 85       # Combined overall passing score
 
 STAGE_SEQUENCE = ["Verbal", "Non-Verbal", "English", "General Science", "Math", "Urdu"]
@@ -33,7 +33,7 @@ def get_latest_questions():
     mtime = os.path.getmtime(file_path) if os.path.exists(file_path) else 0
     return load_questions(file_path, mtime)
 
-# --- CUSTOM CSS WITH NIGHT MODE OVERRIDES FOR MOBILE OPTIONS ---
+# --- CUSTOM CSS WITH NIGHT MODE OVERRIDES & MATCHING BUTTON STYLES ---
 st.markdown("""
     <style>
     /* Question Card Box */
@@ -73,7 +73,6 @@ st.markdown("""
         background-color: transparent !important;
     }
 
-    /* Target option text elements directly */
     div[data-testid="stRadio"] label,
     div[data-testid="stRadio"] label p,
     div[data-testid="stRadio"] label div,
@@ -88,31 +87,43 @@ st.markdown("""
         text-shadow: none !important;
     }
 
-    /* Target option radio circles and containers */
     div[data-testid="stRadio"] div[role="radiogroup"] {
         background-color: #FFFFFF !important;
         padding: 10px;
         border-radius: 8px;
     }
 
-    /* Ensure general text inside card stays dark */
     .question-card p, .question-card span, .question-card h3 {
         color: #0F172A !important;
         opacity: 1 !important;
         -webkit-text-fill-color: #0F172A !important;
     }
 
-    /* Action Buttons */
+    /* Target standard Streamlit buttons (Navigation) to match Teal theme */
     .stButton>button {
         width: 100%;
         font-size: 16px !important;
         font-weight: 600 !important;
         padding: 10px 16px !important;
         border-radius: 8px !important;
+        background-color: #0F766E !important;
+        color: #FFFFFF !important;
+        border: none !important;
     }
+    
+    .stButton>button:hover {
+        background-color: #115E59 !important;
+        color: #FFFFFF !important;
+    }
+
+    .stButton>button:disabled {
+        background-color: #CBD5E1 !important;
+        color: #64748B !important;
+    }
+
     div[data-testid="column"] .stButton>button {
-        padding: 6px 2px !important;
-        font-size: 14px !important;
+        padding: 10px 4px !important;
+        font-size: 15px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -329,7 +340,33 @@ elif not st.session_state.submitted_all:
                 if user_choice:
                     st.session_state.all_answers[q_id] = user_choice
 
-                # 3. COPY QUESTION BUTTON FOR AI EXPLANATION
+                # 3. NAVIGATION BUTTONS (TEAL COLORED TO MATCH)
+                btn_prev, btn_mark, btn_next = st.columns(3)
+                with btn_prev:
+                    if st.button("⬅️ Previous", disabled=(curr_idx == 0)):
+                        st.session_state.current_q = max(0, st.session_state.current_q - 1)
+                        sync_url()
+                        st.rerun()
+
+                with btn_mark:
+                    is_marked = q_id in st.session_state.marked
+                    mark_label = "🔖 Unmark" if is_marked else "📌 Mark for Review"
+                    if st.button(mark_label):
+                        if is_marked:
+                            st.session_state.marked.remove(q_id)
+                        else:
+                            st.session_state.marked.add(q_id)
+                        st.rerun()
+
+                with btn_next:
+                    if st.button("Next ➡️", disabled=(curr_idx == total_q - 1)):
+                        st.session_state.current_q = min(total_q - 1, st.session_state.current_q + 1)
+                        sync_url()
+                        st.rerun()
+
+                st.write("") # Spacing before bottom copy button
+
+                # 4. COPY QUESTION BUTTON AT THE VERY BOTTOM
                 copy_text = f"Subject: {curr_stage_name}\\nQuestion: {row[question_col]}\\nOptions:\\nA) {options[0]}\\nB) {options[1]}\\nC) {options[2]}\\nD) {options[3]}\\n\\nPlease explain the correct answer step-by-step."
 
                 st.components.v1.html(
@@ -339,7 +376,7 @@ elif not st.session_state.submitted_all:
                         background-color: #0F766E;
                         color: white;
                         border: none;
-                        padding: 10px 14px;
+                        padding: 12px 14px;
                         font-size: 15px;
                         font-weight: 600;
                         border-radius: 8px;
@@ -368,33 +405,8 @@ elif not st.session_state.submitted_all:
                     }}
                     </script>
                     """,
-                    height=50
+                    height=55
                 )
-                st.write("")
-
-                # 4. NAVIGATION BUTTONS
-                btn_prev, btn_mark, btn_next = st.columns(3)
-                with btn_prev:
-                    if st.button("⬅️ Previous", disabled=(curr_idx == 0)):
-                        st.session_state.current_q = max(0, st.session_state.current_q - 1)
-                        sync_url()
-                        st.rerun()
-
-                with btn_mark:
-                    is_marked = q_id in st.session_state.marked
-                    mark_label = "🔖 Unmark" if is_marked else "📌 Mark for Review"
-                    if st.button(mark_label):
-                        if is_marked:
-                            st.session_state.marked.remove(q_id)
-                        else:
-                            st.session_state.marked.add(q_id)
-                        st.rerun()
-
-                with btn_next:
-                    if st.button("Next ➡️", disabled=(curr_idx == total_q - 1)):
-                        st.session_state.current_q = min(total_q - 1, st.session_state.current_q + 1)
-                        sync_url()
-                        st.rerun()
 
             # RIGHT-HAND PANEL
             with col_nav:
