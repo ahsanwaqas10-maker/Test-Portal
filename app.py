@@ -21,11 +21,17 @@ st.set_page_config(page_title="Exam Portal", layout="wide")
 if st_autorefresh:
     st_autorefresh(interval=1000, key="exam_timer_tick")
 
+# --- DYNAMIC EXCEL LOADING WITH CACHE INVALIDATION ---
 @st.cache_data
-def load_questions():
-    df = pd.read_excel("questions.xlsx")
+def load_questions(file_path="questions.xlsx", mtime=0):
+    df = pd.read_excel(file_path)
     df.columns = df.columns.astype(str).str.strip()
     return df
+
+def get_latest_questions():
+    file_path = "questions.xlsx"
+    mtime = os.path.getmtime(file_path) if os.path.exists(file_path) else 0
+    return load_questions(file_path, mtime)
 
 # --- CUSTOM CSS WITH NIGHT MODE OVERRIDES FOR MOBILE OPTIONS ---
 st.markdown("""
@@ -202,7 +208,7 @@ if not st.session_state.authenticated:
 # --- STAGE 2: MULTI-SERIES EXAM INTERFACE ---
 elif not st.session_state.submitted_all:
     try:
-        df_full = load_questions()
+        df_full = get_latest_questions()
         if df_full.empty:
             st.error("The question database is empty.")
             st.stop()
@@ -287,6 +293,7 @@ elif not st.session_state.submitted_all:
             q_id = row[id_col]
 
             with col_main:
+                # 1. QUESTION DISPLAY
                 st.markdown(f"""
                     <div class="question-card">
                         <span style="color: #2563EB; font-weight: bold; font-size: 14px;">QUESTION {curr_idx + 1} OF {total_q}</span>
@@ -306,6 +313,7 @@ elif not st.session_state.submitted_all:
                     str(row[op_d]).strip()
                 ]
 
+                # 2. RADIO OPTIONS DISPLAY
                 saved_ans = st.session_state.all_answers.get(q_id, None)
                 saved_index = options.index(saved_ans) if saved_ans in options else None
 
@@ -321,6 +329,50 @@ elif not st.session_state.submitted_all:
                 if user_choice:
                     st.session_state.all_answers[q_id] = user_choice
 
+                # 3. COPY QUESTION BUTTON FOR AI EXPLANATION
+                copy_text = f"Subject: {curr_stage_name}\\nQuestion: {row[question_col]}\\nOptions:\\nA) {options[0]}\\nB) {options[1]}\\nC) {options[2]}\\nD) {options[3]}\\n\\nPlease explain the correct answer step-by-step."
+
+                st.components.v1.html(
+                    f"""
+                    <button id="copyBtn" onclick="copyToClipboard()" style="
+                        width: 100%;
+                        background-color: #0F766E;
+                        color: white;
+                        border: none;
+                        padding: 10px 14px;
+                        font-size: 15px;
+                        font-weight: 600;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        gap: 8px;
+                    ">
+                        📋 Copy Question for AI Explanation
+                    </button>
+                    <script>
+                    function copyToClipboard() {{
+                        const textToCopy = `{copy_text}`;
+                        navigator.clipboard.writeText(textToCopy).then(function() {{
+                            const btn = document.getElementById('copyBtn');
+                            btn.innerText = '✅ Copied to Clipboard!';
+                            btn.style.backgroundColor = '#15803D';
+                            setTimeout(() => {{
+                                btn.innerText = '📋 Copy Question for AI Explanation';
+                                btn.style.backgroundColor = '#0F766E';
+                            }}, 2000);
+                        }}).catch(function(err) {{
+                            console.error('Copy failed: ', err);
+                        }});
+                    }}
+                    </script>
+                    """,
+                    height=50
+                )
+                st.write("")
+
+                # 4. NAVIGATION BUTTONS
                 btn_prev, btn_mark, btn_next = st.columns(3)
                 with btn_prev:
                     if st.button("⬅️ Previous", disabled=(curr_idx == 0)):
@@ -412,7 +464,7 @@ else:
     st.markdown(f"**Candidate Name:** {st.session_state.student_name} | **Test Number:** `{st.session_state.test_number}`")
 
     try:
-        df_full = load_questions()
+        df_full = get_latest_questions()
         cols = {c.lower().replace(" ", ""): c for c in df_full.columns}
         id_col = cols.get('id', df_full.columns[0])
         subject_col = cols.get('subject', df_full.columns[1])
