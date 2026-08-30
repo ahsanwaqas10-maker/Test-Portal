@@ -1,13 +1,13 @@
 import streamlit as st
 import pandas as pd
 import time
+import os
 
 # --- CONFIGURATION ---
 PORTAL_PIN = "1234"
 DEFAULT_TEST_MINUTES = 15     # Time limit per test section
 PASSING_PERCENTAGE = 85       # Combined overall passing score
 
-# Sequence of test series
 STAGE_SEQUENCE = ["Verbal", "Non-Verbal", "English", "General Science", "Math", "Urdu"]
 
 st.set_page_config(page_title="Exam Portal", layout="wide")
@@ -19,21 +19,35 @@ def load_questions():
 
 st.title("📝 Exam Portal")
 
-# Session state initialization
+# --- PERSISTENCE HELPERS (URL PARAMETERS) ---
+query_params = st.query_params
+
 if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
+    st.session_state.authenticated = query_params.get("auth", "0") == "1"
 if "student_name" not in st.session_state:
-    st.session_state.student_name = ""
+    st.session_state.student_name = query_params.get("name", "")
 if "stage_index" not in st.session_state:
-    st.session_state.stage_index = 0
+    st.session_state.stage_index = int(query_params.get("stage", "0"))
 if "current_q" not in st.session_state:
-    st.session_state.current_q = 0
+    st.session_state.current_q = int(query_params.get("q", "0"))
+if "start_time" not in st.session_state:
+    st.session_state.start_time = float(query_params.get("t", "0")) if query_params.get("t", "0") != "0" else time.time()
 if "all_answers" not in st.session_state:
-    st.session_state.all_answers = {}  # Stores answers across all stages
+    st.session_state.all_answers = {}
 if "marked" not in st.session_state:
     st.session_state.marked = set()
 if "submitted_all" not in st.session_state:
-    st.session_state.submitted_all = False
+    st.session_state.submitted_all = query_params.get("done", "0") == "1"
+
+def sync_url():
+    st.query_params.update({
+        "auth": "1" if st.session_state.authenticated else "0",
+        "name": st.session_state.student_name,
+        "stage": str(st.session_state.stage_index),
+        "q": str(st.session_state.current_q),
+        "t": str(st.session_state.start_time),
+        "done": "1" if st.session_state.submitted_all else "0"
+    })
 
 # --- STAGE 1: LOGIN ENTRY FORM ---
 if not st.session_state.authenticated:
@@ -53,7 +67,9 @@ if not st.session_state.authenticated:
                 st.session_state.authenticated = True
                 st.session_state.student_name = name_input.strip()
                 st.session_state.stage_index = 0
+                st.session_state.current_q = 0
                 st.session_state.start_time = time.time()
+                sync_url()
                 st.rerun()
 
 # --- STAGE 2: MULTI-SERIES EXAM INTERFACE ---
@@ -73,32 +89,32 @@ elif not st.session_state.submitted_all:
         op_c = cols.get('optionc', df_full.columns[5])
         op_d = cols.get('optiond', df_full.columns[6])
         ans_col = cols.get('correctanswer', df_full.columns[7])
+        img_col = cols.get('image', None)  # Dynamic check for Image column
 
-        # Get current stage subject
         curr_stage_name = STAGE_SEQUENCE[st.session_state.stage_index]
-        
-        # Filter questions for current stage (case-insensitive search)
         df_stage = df_full[df_full[subject_col].astype(str).str.strip().str.lower() == curr_stage_name.lower()].reset_index(drop=True)
 
-        # Skip stage automatically if no questions exist for this subject
         if df_stage.empty:
             if st.session_state.stage_index < len(STAGE_SEQUENCE) - 1:
                 st.session_state.stage_index += 1
                 st.session_state.current_q = 0
                 st.session_state.start_time = time.time()
+                sync_url()
                 st.rerun()
             else:
                 st.session_state.submitted_all = True
+                sync_url()
                 st.rerun()
 
         total_q = len(df_stage)
 
-        # Reverse timer per stage
+        if st.session_state.current_q >= total_q:
+            st.session_state.current_q = 0
+
         total_seconds = DEFAULT_TEST_MINUTES * 60
         elapsed_seconds = int(time.time() - st.session_state.start_time)
         remaining_seconds = total_seconds - elapsed_seconds
 
-        # Time-out handler for current stage
         if remaining_seconds <= 0:
             st.warning(f"⏰ Time expired for section: {curr_stage_name}!")
             time.sleep(2)
@@ -109,11 +125,11 @@ elif not st.session_state.submitted_all:
                 st.session_state.start_time = time.time()
             else:
                 st.session_state.submitted_all = True
+            sync_url()
             st.rerun()
 
         mins, secs = divmod(remaining_seconds, 60)
 
-        # Top Banner showing active section & progress
         st.info(f"📍 **Series {st.session_state.stage_index + 1} of {len(STAGE_SEQUENCE)}:** {curr_stage_name} Test | Candidate: **{st.session_state.student_name}**")
         st.metric("⏳ Section Time Remaining", f"{mins:02d}:{secs:02d}")
         st.divider()
@@ -127,6 +143,14 @@ elif not st.session_state.submitted_all:
         with col_main:
             st.subheader(f"Question {curr_idx + 1} of {total_q}")
             st.markdown(f"### {row[question_col]}")
+
+            # Display image if provided in the Image column
+            if img_col and pd.notna(row[img_col]):
+                img_name = str(row[img_col]).strip()
+                if img_name and os.path.exists(img_name):
+                    st.image(img_name, use_container_width=True)
+                elif img_name:
+                    st.warning(f"⚠️ Image file '{img_name}' missing from repository.")
 
             options = [
                 str(row[op_a]).strip(),
@@ -155,6 +179,7 @@ elif not st.session_state.submitted_all:
             with btn_prev:
                 if st.button("⬅️ Previous", disabled=(curr_idx == 0)):
                     st.session_state.current_q -= 1
+                    sync_url()
                     st.rerun()
 
             with btn_mark:
@@ -170,6 +195,7 @@ elif not st.session_state.submitted_all:
             with btn_next:
                 if st.button("Next ➡️", disabled=(curr_idx == total_q - 1)):
                     st.session_state.current_q += 1
+                    sync_url()
                     st.rerun()
 
         with col_nav:
@@ -191,11 +217,11 @@ elif not st.session_state.submitted_all:
                 with grid_cols[col_idx]:
                     if st.button(badge, key=f"nav_btn_{idx}"):
                         st.session_state.current_q = idx
+                        sync_url()
                         st.rerun()
 
             st.write("---")
             
-            # Button label changes dynamically based on stage
             if st.session_state.stage_index < len(STAGE_SEQUENCE) - 1:
                 next_stage = STAGE_SEQUENCE[st.session_state.stage_index + 1]
                 submit_label = f"Submit & Proceed to {next_stage} ➡️"
@@ -205,7 +231,6 @@ elif not st.session_state.submitted_all:
             if st.button(submit_label, type="primary"):
                 st.session_state.confirm_submit = True
 
-        # Confirmation Modal
         if st.session_state.get("confirm_submit", False):
             st.warning(f"⚠️ **CONFIRM SUBMISSION FOR {curr_stage_name.upper()} TEST**")
             
@@ -227,6 +252,7 @@ elif not st.session_state.submitted_all:
                         st.session_state.start_time = time.time()
                     else:
                         st.session_state.submitted_all = True
+                    sync_url()
                     st.rerun()
             with c_no:
                 if st.button("❌ Return to Section"):
@@ -256,7 +282,6 @@ else:
 
         st.subheader("Sectional Breakdown:")
         
-        # Display breakdown per subject series
         for subject_name in STAGE_SEQUENCE:
             df_sub = df_full[df_full[subject_col].astype(str).str.strip().str.lower() == subject_name.lower()]
             if not df_sub.empty:
@@ -284,6 +309,7 @@ else:
             st.warning(f"❌ Exam Series Failed. Overall Score: {final_pct:.1f}% (Required: {PASSING_PERCENTAGE}%)")
 
         if st.button("🔄 Logout & Exit"):
+            st.query_params.clear()
             st.session_state.authenticated = False
             st.session_state.student_name = ""
             st.session_state.stage_index = 0
