@@ -27,7 +27,7 @@ def load_questions():
     df.columns = df.columns.astype(str).str.strip()
     return df
 
-# --- CUSTOM CSS FOR HIGH VISIBILITY (DESKTOP & MOBILE) ---
+# --- CUSTOM CSS WITH NIGHT MODE OVERRIDES FOR MOBILE OPTIONS ---
 st.markdown("""
     <style>
     /* Question Card Box */
@@ -40,7 +40,7 @@ st.markdown("""
         box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.08);
     }
     
-    /* Question Title - Forced High Contrast for Mobile & Dark Mode */
+    /* Question Title - Forced High Contrast */
     .question-title {
         color: #0F172A !important;
         font-size: 22px !important;
@@ -62,17 +62,34 @@ st.markdown("""
         box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.06);
     }
     
-    /* Radio Option Text - Force Visibility on Mobile */
-    div[data-testid="stRadio"] label p {
+    /* --- OVERRIDE MOBILE NIGHT/DARK MODE FOR RADIO OPTIONS --- */
+    div[data-testid="stRadio"] {
+        background-color: transparent !important;
+    }
+
+    /* Target option text elements directly */
+    div[data-testid="stRadio"] label,
+    div[data-testid="stRadio"] label p,
+    div[data-testid="stRadio"] label div,
+    div[data-testid="stRadio"] label span,
+    div[data-testid="stWidgetLabel"] p {
+        color: #0F172A !important;
         font-size: 18px !important;
         font-weight: 600 !important;
-        color: #0F172A !important;
         line-height: 1.5 !important;
         opacity: 1 !important;
         -webkit-text-fill-color: #0F172A !important;
+        text-shadow: none !important;
     }
 
-    /* Target Streamlit markdown overrides inside question cards */
+    /* Target option radio circles and containers */
+    div[data-testid="stRadio"] div[role="radiogroup"] {
+        background-color: #FFFFFF !important;
+        padding: 10px;
+        border-radius: 8px;
+    }
+
+    /* Ensure general text inside card stays dark */
     .question-card p, .question-card span, .question-card h3 {
         color: #0F172A !important;
         opacity: 1 !important;
