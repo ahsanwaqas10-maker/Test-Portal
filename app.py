@@ -105,6 +105,8 @@ if "submitted_all" not in st.session_state:
     st.session_state.submitted_all = query_params.get("done", "0") == "1"
 if "transition" not in st.session_state:
     st.session_state.transition = query_params.get("trans", "0") == "1"
+if "show_modal" not in st.session_state:
+    st.session_state.show_modal = False
 
 def sync_url():
     st.query_params.update({
@@ -117,6 +119,26 @@ def sync_url():
         "done": "1" if st.session_state.submitted_all else "0",
         "trans": "1" if st.session_state.transition else "0"
     })
+
+# --- NATIVE STREAMLIT CONFIRMATION DIALOG POP-UP ---
+if hasattr(st, "dialog"):
+    @st.dialog("Confirm Section Submission")
+    def confirm_submission_dialog(stage_name, answered, total):
+        st.write(f"Are you sure you want to submit the **{stage_name} Test**?")
+        st.write(f"* **Answered:** {answered} / {total}")
+        st.write(f"* **Unanswered:** {total - answered}")
+        st.write("---")
+        c_yes, c_no = st.columns(2)
+        with c_yes:
+            if st.button("✅ Confirm & Next", type="primary"):
+                st.session_state.show_modal = False
+                st.session_state.transition = True
+                sync_url()
+                st.rerun()
+        with c_no:
+            if st.button("❌ Cancel"):
+                st.session_state.show_modal = False
+                st.rerun()
 
 # --- STAGE 1: LOGIN ENTRY FORM ---
 if not st.session_state.authenticated:
@@ -141,6 +163,7 @@ if not st.session_state.authenticated:
                 st.session_state.stage_index = 0
                 st.session_state.current_q = 0
                 st.session_state.transition = False
+                st.session_state.show_modal = False
                 st.session_state.start_time = time.time()
                 sync_url()
                 st.rerun()
@@ -200,7 +223,7 @@ elif not st.session_state.submitted_all:
                         st.session_state.marked = set()
                         st.session_state.start_time = time.time()
                         st.session_state.transition = False
-                        st.session_state.confirm_submit = False
+                        st.session_state.show_modal = False
                         sync_url()
                         st.rerun()
             else:
@@ -219,7 +242,7 @@ elif not st.session_state.submitted_all:
                 st.warning(f"⏰ Time expired for section: {curr_stage_name}!")
                 time.sleep(1.5)
                 st.session_state.transition = True
-                st.session_state.confirm_submit = False
+                st.session_state.show_modal = False
                 sync_url()
                 st.rerun()
 
@@ -328,24 +351,27 @@ elif not st.session_state.submitted_all:
                     submit_label = "🚨 Finish Complete Exam"
 
                 if st.button(submit_label, type="primary"):
-                    st.session_state.confirm_submit = True
+                    st.session_state.show_modal = True
 
-            # CONFIRMATION MODAL POPUP
-            if st.session_state.get("confirm_submit", False):
-                st.warning(f"⚠️ **CONFIRM SUBMISSION FOR {curr_stage_name.upper()} TEST**")
-                st.write(f"You have answered {answered_cnt} out of {total_q} questions. Unanswered: {unanswered_cnt}")
-
-                c_yes, c_no = st.columns(2)
-                with c_yes:
-                    if st.button("✅ Confirm Submission", type="primary"):
-                        st.session_state.confirm_submit = False
-                        st.session_state.transition = True
-                        sync_url()
-                        st.rerun()
-                with c_no:
-                    if st.button("❌ Back to Test"):
-                        st.session_state.confirm_submit = False
-                        st.rerun()
+            # TRIGGER DIALOG POP-UP OVERLAY
+            if st.session_state.get("show_modal", False):
+                if hasattr(st, "dialog"):
+                    confirm_submission_dialog(curr_stage_name, answered_cnt, total_q)
+                else:
+                    # Fallback pop-up box if running on older Streamlit versions
+                    st.warning(f"⚠️ **Confirm Submission for {curr_stage_name} Test**")
+                    st.write(f"Answered: {answered_cnt} / {total_q}")
+                    c_yes, c_no = st.columns(2)
+                    with c_yes:
+                        if st.button("✅ Confirm"):
+                            st.session_state.show_modal = False
+                            st.session_state.transition = True
+                            sync_url()
+                            st.rerun()
+                    with c_no:
+                        if st.button("❌ Cancel"):
+                            st.session_state.show_modal = False
+                            st.rerun()
 
     except Exception as e:
         st.error(f"System Error: {e}")
